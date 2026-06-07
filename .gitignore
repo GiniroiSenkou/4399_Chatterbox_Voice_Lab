@@ -1,0 +1,70 @@
+# Runtime data and private assets
+data/**
+!data/.gitkeep
+!data/db/.gitkeep
+!data/models/.gitkeep
+!data/outputs/.gitkeep
+!data/projects/.gitkeep
+!data/tmp/.gitkeep
+!data/voices/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.aac
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local tooling
+.codex
+.agents
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+docker-compose.override.yml

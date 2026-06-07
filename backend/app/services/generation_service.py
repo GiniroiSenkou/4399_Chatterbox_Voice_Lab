@@ -10,14 +10,19 @@ import torchaudio
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.languages import normalize_multilingual_language
+from app.core.languages import normalize_multilingual_language, resolve_multilingual_language_hint
 from app.core.events import event_bus
-from app.core.exceptions import GenerationNotFoundError, VoiceNotFoundError
+from app.core.exceptions import GenerationNotFoundError, VoiceNotFoundError, InvalidGenerationRequestError
 from app.core.storage import generate_id, output_path
 from app.models.generation import Generation
 from app.models.voice_profile import VoiceProfile
 from app.schemas.generation import GenerateRequest, GenerateABRequest, GenerationParams
 from app.services.engine_manager import EngineManager
+from app.services.multilingual_validation import (
+    MULTILINGUAL_SHORT_TEXT_ERROR,
+    analyze_multilingual_prompt,
+    is_multilingual_prompt_too_short,
+)
 from app.services.text_chunker import chunk_text
 from app.utils.paralinguistic import prepare_text_for_model
 
@@ -39,6 +44,24 @@ class GenerationService:
             raise VoiceNotFoundError(voice_id)
         return voice
 
+    def _resolve_voice_tag_language(self, voice: VoiceProfile) -> str | None:
+        if not voice.tags:
+            return None
+        try:
+            tags = json.loads(voice.tags)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse voice tags for language resolution", extra={"voice_id": voice.id})
+            return None
+        if not isinstance(tags, list):
+            return None
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            resolved = resolve_multilingual_language_hint(tag)
+            if resolved:
+                return resolved
+        return None
+
     def _resolve_language_id(self, model: str, params: GenerationParams, voice: VoiceProfile) -> str | None:
         if model != "multilingual":
             return None
@@ -47,11 +70,25 @@ class GenerationService:
         if requested:
             return requested
 
-        saved_voice_language = normalize_multilingual_language(voice.language)
+        saved_voice_language = resolve_multilingual_language_hint(voice.language)
         if saved_voice_language:
             return saved_voice_language
 
+        tagged_voice_language = self._resolve_voice_tag_language(voice)
+        if tagged_voice_language:
+            return tagged_voice_language
+
         return "en"
+
+    def _validate_multilingual_request(self, text: str, model: str) -> dict[str, int | str] | None:
+        if model != "multilingual":
+            return None
+
+        analysis = analyze_multilingual_prompt(text)
+        if is_multilingual_prompt_too_short(text):
+            raise InvalidGenerationRequestError(MULTILINGUAL_SHORT_TEXT_ERROR)
+
+        return analysis
 
     def _build_engine_params(
         self,
@@ -142,6 +179,7 @@ class GenerationService:
     async def generate(self, request: GenerateRequest) -> str:
         """Submit a generation job. Returns job_id."""
         voice = await self._get_voice(request.voice_id)
+        multilingual_prompt_meta = self._validate_multilingual_request(request.text, request.model)
         params_payload = request.params.model_dump()
         if request.preset_name:
             params_payload["_preset_name"] = request.preset_name
@@ -151,6 +189,8 @@ class GenerationService:
         resolved_language = self._resolve_language_id(request.model, request.params, voice)
         if resolved_language:
             params_payload["_resolved_language_id"] = resolved_language
+        if multilingual_prompt_meta:
+            params_payload["_multilingual_prompt_meta"] = multilingual_prompt_meta
 
         gen_id = generate_id()
         generation = Generation(
@@ -176,6 +216,7 @@ class GenerationService:
     async def generate_ab(self, request: GenerateABRequest) -> tuple[str, str, str]:
         """Submit A/B comparison. Returns (job_id_a, job_id_b, ab_pair_id)."""
         voice = await self._get_voice(request.voice_id)
+        multilingual_prompt_meta = self._validate_multilingual_request(request.text, request.model_b)
         params_payload = request.params.model_dump()
         if request.preset_name:
             params_payload["_preset_name"] = request.preset_name
@@ -188,6 +229,8 @@ class GenerationService:
         )
         if resolved_language:
             params_payload["_resolved_language_id"] = resolved_language
+        if multilingual_prompt_meta:
+            params_payload["_multilingual_prompt_meta"] = multilingual_prompt_meta
         ab_pair_id = generate_id()
 
         gen_id_a = generate_id()

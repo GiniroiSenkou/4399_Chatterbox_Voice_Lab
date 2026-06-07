@@ -27,7 +27,7 @@ async def _preload_model(engine, model_name: str) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Starting Chatterbox Voice Lab Pro...")
+    logger.info("Starting Chatterbox Voice Lab...")
     settings.ensure_dirs()
 
     # Initialize database
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     if settings.default_model:
         asyncio.create_task(_preload_model(engine, settings.default_model))
 
-    logger.info("Chatterbox Voice Lab Pro ready — model loading in background")
+    logger.info("Chatterbox Voice Lab ready — model loading in background")
 
     yield
 
@@ -66,9 +66,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Chatterbox Voice Lab Pro",
+    title="Chatterbox Voice Lab",
     version="1.0.0",
-    description="Professional Voice Cloning & Synthesis Studio",
+    description="Voice Cloning & Synthesis Studio",
     lifespan=lifespan,
 )
 

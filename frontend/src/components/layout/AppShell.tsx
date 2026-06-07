@@ -62,7 +62,7 @@ export function AppShell() {
           <div className="w-7 h-7 rounded-lg gradient-accent flex items-center justify-center">
             <Mic2 className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-sm gradient-text">Chatterbox Voice Lab Pro</span>
+          <span className="font-semibold text-sm gradient-text">Chatterbox Voice Lab</span>
         </div>
 
         <div className="flex-1" />

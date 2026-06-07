@@ -87,7 +87,7 @@ export function ControlPanel() {
               className="w-full px-3 py-2 text-xs rounded-xl focus:outline-none focus:border-violet-500/50 transition-colors"
               style={{ background: "var(--bg-input)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
             >
-              <option value="">Auto (match reference)</option>
+              <option value="">Auto (use selected voice language)</option>
               {LANGUAGES.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
               ))}

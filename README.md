@@ -161,3 +161,12 @@ If generation fails with a message about a voice prompt needing around 5 seconds
 - Upload 5-60 seconds of clear speech.
 - Avoid long silence-only sections.
 - If needed, trim silence in an editor before upload and keep continuous spoken audio.
+
+### Multilingual Italian outputs collapse into burps or ultra-short audio
+
+This usually happens when the multilingual prompt is too short to generate stable speech.
+
+- Use at least a short full sentence instead of a one-word or very short reply.
+- Italian works best when the selected reference voice is also Italian.
+- If you are cloning across languages, lower `cfg_weight` toward `0.0-0.3`.
+- The app now blocks multilingual prompts that are too short because they often produce artifact audio even when the generation technically finishes.

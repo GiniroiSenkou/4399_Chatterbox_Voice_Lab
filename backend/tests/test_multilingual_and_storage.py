@@ -43,14 +43,28 @@ def test_generation_service_prefers_explicit_language() -> None:
 
 def test_generation_service_uses_saved_voice_language_when_request_missing() -> None:
     service = GenerationService(db=None, engine=None)  # type: ignore[arg-type]
-    voice = SimpleNamespace(language="it")
+    voice = SimpleNamespace(language="it", tags=None)
+    params = GenerationParams()
+    assert service._resolve_language_id("multilingual", params, voice) == "it"
+
+
+def test_generation_service_uses_voice_tag_language_when_field_missing() -> None:
+    service = GenerationService(db=None, engine=None)  # type: ignore[arg-type]
+    voice = SimpleNamespace(language=None, tags='["Italian", "warm"]', id="voice-1")
+    params = GenerationParams()
+    assert service._resolve_language_id("multilingual", params, voice) == "it"
+
+
+def test_generation_service_uses_voice_tag_language_code_when_field_missing() -> None:
+    service = GenerationService(db=None, engine=None)  # type: ignore[arg-type]
+    voice = SimpleNamespace(language=None, tags='["it", "female"]', id="voice-2")
     params = GenerationParams()
     assert service._resolve_language_id("multilingual", params, voice) == "it"
 
 
 def test_generation_service_falls_back_to_english_when_no_language_available() -> None:
     service = GenerationService(db=None, engine=None)  # type: ignore[arg-type]
-    voice = SimpleNamespace(language=None)
+    voice = SimpleNamespace(language=None, tags=None)
     params = GenerationParams()
     assert service._resolve_language_id("multilingual", params, voice) == "en"
 

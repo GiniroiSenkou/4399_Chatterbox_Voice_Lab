@@ -4,13 +4,20 @@ import { useGeneration } from "@/hooks/use-generation";
 import { useGenerationStore } from "@/stores/generation-store";
 import { useVoiceStore } from "@/stores/voice-store";
 import { cn } from "@/lib/utils";
+import { MULTILINGUAL_SHORT_TEXT_ERROR, isMultilingualPromptTooShort } from "@/lib/multilingual-validation";
 
 export function GenerateButton() {
   const { triggerGenerate, triggerGenerateAB, isGenerating, queueLength, progress, stage, canGenerate } =
     useGeneration();
-  const { text, queue } = useGenerationStore();
+  const { text, queue, model, params } = useGenerationStore();
   const { voices, selectedVoiceId } = useVoiceStore();
   const selectedVoice = voices.find((v) => v.id === selectedVoiceId);
+  const multilingualTooShort = model === "multilingual" && isMultilingualPromptTooShort(text);
+  const voiceLanguageMismatch =
+    model === "multilingual"
+    && selectedVoice?.language
+    && params.language_id
+    && selectedVoice.language !== params.language_id;
   const generateDisabled = !canGenerate || !text.trim();
   const compareDisabled = isGenerating || queueLength > 0 || !canGenerate || !text.trim();
 
@@ -93,6 +100,29 @@ export function GenerateButton() {
           {(stageLabels[stage] ?? "Generating…")}
           {queueLength > 0 ? ` • ${queueLength} queued` : ""}
         </p>
+      )}
+
+      {model === "multilingual" && (
+        <div
+          className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
+          style={{ borderColor: "var(--border-subtle)", background: "var(--bg-input)", color: "var(--text-muted)" }}
+        >
+          <p>Multilingual works best with a same-language reference clip.</p>
+          <p>Very short prompts can collapse into artifact audio.</p>
+          <p>For cross-language cloning, lower CFG Weight toward `0.0–0.3`.</p>
+        </div>
+      )}
+
+      {multilingualTooShort && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          {MULTILINGUAL_SHORT_TEXT_ERROR}
+        </div>
+      )}
+
+      {voiceLanguageMismatch && (
+        <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] text-cyan-300">
+          Selected voice language is {selectedVoice.language?.toUpperCase()} but multilingual output is set to {params.language_id?.toUpperCase()}. This can work, but lowering CFG Weight often helps.
+        </div>
       )}
 
       {queueLength > 0 && (

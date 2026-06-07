@@ -1,9 +1,128 @@
 import { create } from "zustand";
 import type { Generation } from "@/types/generation";
-import { DEFAULT_PARAMS, type GenerationParams, type ModelId } from "@/lib/constants";
+import { DEFAULT_PARAMS, LANGUAGES, type GenerationParams, type ModelId } from "@/lib/constants";
 import { generateApi } from "@/lib/api";
 import { useVoiceStore } from "./voice-store";
 import { usePlayerStore } from "./player-store";
+
+const GENERATION_DRAFT_KEY = "vl-generation-draft";
+const SUPPORTED_LANGUAGE_IDS: ReadonlySet<string> = new Set(LANGUAGES.map(({ id }) => id));
+const LANGUAGE_TAG_IDS: ReadonlyMap<string, string> = new Map(
+  LANGUAGES.flatMap(({ id, label }) => [
+    [id, id],
+    [label.toLowerCase(), id],
+  ]),
+);
+
+type LanguageSelectionMode = "auto" | "manual";
+
+interface GenerationDraftState {
+  text: string;
+  model: ModelId;
+  params: GenerationParams;
+  selectedPreset: SelectedPresetRef | null;
+  languageMode: LanguageSelectionMode;
+}
+
+function readDraftState(): GenerationDraftState {
+  if (typeof window === "undefined") {
+    return {
+      text: "",
+      model: "turbo",
+      params: { ...DEFAULT_PARAMS },
+      selectedPreset: null,
+      languageMode: "auto",
+    };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(GENERATION_DRAFT_KEY);
+    if (!raw) {
+      throw new Error("missing draft");
+    }
+    const parsed = JSON.parse(raw) as Partial<GenerationDraftState>;
+    return {
+      text: typeof parsed.text === "string" ? parsed.text : "",
+      model: parsed.model === "standard" || parsed.model === "multilingual" ? parsed.model : "turbo",
+      params: { ...DEFAULT_PARAMS, ...(parsed.params ?? {}) },
+      selectedPreset: parsed.selectedPreset ?? null,
+      languageMode:
+        parsed.languageMode === "auto" || parsed.languageMode === "manual"
+          ? parsed.languageMode
+          : parsed.params?.language_id
+            ? "manual"
+            : "auto",
+    };
+  } catch {
+    return {
+      text: "",
+      model: "turbo",
+      params: { ...DEFAULT_PARAMS },
+      selectedPreset: null,
+      languageMode: "auto",
+    };
+  }
+}
+
+function persistDraftState(
+  state: Pick<GenerationStore, "text" | "model" | "params" | "selectedPreset" | "languageMode">,
+): void {
+  if (typeof window === "undefined") return;
+
+  const payload: GenerationDraftState = {
+    text: state.text,
+    model: state.model,
+    params: state.params,
+    selectedPreset: state.selectedPreset,
+    languageMode: state.languageMode,
+  };
+  window.localStorage.setItem(GENERATION_DRAFT_KEY, JSON.stringify(payload));
+}
+
+function normalizeLanguageId(languageId: string | null | undefined): string | null {
+  if (!languageId) return null;
+  const normalized = languageId.trim().toLowerCase();
+  return SUPPORTED_LANGUAGE_IDS.has(normalized) ? normalized : null;
+}
+
+function findLanguageIdInTags(tags: string[] | null | undefined): string | null {
+  if (!tags?.length) return null;
+  for (const tag of tags) {
+    const normalized = tag.trim().toLowerCase();
+    const languageId = LANGUAGE_TAG_IDS.get(normalized);
+    if (languageId) {
+      return languageId;
+    }
+  }
+  return null;
+}
+
+function getSelectedVoiceLanguageId(): string | null {
+  const { voices, selectedVoiceId } = useVoiceStore.getState();
+  if (!selectedVoiceId) return null;
+  const selectedVoice = voices.find((voice) => voice.id === selectedVoiceId);
+  return normalizeLanguageId(selectedVoice?.language) ?? findLanguageIdInTags(selectedVoice?.tags);
+}
+
+function resolveLanguageState(
+  model: ModelId,
+  params: GenerationParams,
+  languageMode: LanguageSelectionMode,
+): { params: GenerationParams; languageMode: LanguageSelectionMode } {
+  if (model !== "multilingual" || languageMode !== "auto") {
+    return { params, languageMode };
+  }
+
+  const nextLanguageId = getSelectedVoiceLanguageId();
+  if (params.language_id === nextLanguageId) {
+    return { params, languageMode };
+  }
+
+  return {
+    params: { ...params, language_id: nextLanguageId },
+    languageMode,
+  };
+}
 
 interface PendingGeneration {
   id: string;
@@ -24,6 +143,7 @@ interface GenerationStore {
   model: ModelId;
   params: GenerationParams;
   selectedPreset: SelectedPresetRef | null;
+  languageMode: LanguageSelectionMode;
   activeJobId: string | null;
   activeJobProgress: number;
   activeJobStage: string;
@@ -48,10 +168,7 @@ interface GenerationStore {
 }
 
 export const useGenerationStore = create<GenerationStore>((set, get) => ({
-  text: "",
-  model: "turbo",
-  params: { ...DEFAULT_PARAMS },
-  selectedPreset: null,
+  ...readDraftState(),
   activeJobId: null,
   activeJobProgress: 0,
   activeJobStage: "",
@@ -60,13 +177,70 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
   generations: [],
   error: null,
 
-  setText: (text) => set({ text }),
-  setModel: (model) => set({ model, selectedPreset: null }),
+  setText: (text) =>
+    set((s) => {
+      const next = { text };
+      persistDraftState({ ...s, ...next });
+      return next;
+    }),
+  setModel: (model) =>
+    set((s) => {
+      const resolved = resolveLanguageState(model, s.params, s.languageMode);
+      const next = {
+        model,
+        params: resolved.params,
+        languageMode: resolved.languageMode,
+        selectedPreset: null,
+      };
+      persistDraftState({ ...s, ...next });
+      return next;
+    }),
   setParam: (key, value) =>
-    set((s) => ({ params: { ...s.params, [key]: value }, selectedPreset: null })),
+    set((s) => {
+      const nextLanguageMode =
+        key === "language_id" ? (normalizeLanguageId(typeof value === "string" ? value : null) ? "manual" : "auto") : s.languageMode;
+      const nextParams = (
+        key === "language_id"
+          ? { ...s.params, language_id: normalizeLanguageId(typeof value === "string" ? value : null) }
+          : { ...s.params, [key]: value }
+      ) as GenerationParams;
+      const resolved = resolveLanguageState(s.model, nextParams, nextLanguageMode);
+      const next = {
+        params: resolved.params,
+        languageMode: resolved.languageMode,
+        selectedPreset: null,
+      };
+      persistDraftState({ ...s, ...next });
+      return next;
+    }),
   setParams: (params) =>
-    set((s) => ({ params: { ...s.params, ...params }, selectedPreset: null })),
-  setSelectedPreset: (preset) => set({ selectedPreset: preset }),
+    set((s) => {
+      const hasLanguageId = Object.prototype.hasOwnProperty.call(params, "language_id");
+      const nextLanguageMode = hasLanguageId
+        ? (normalizeLanguageId(typeof params.language_id === "string" ? params.language_id : null) ? "manual" : "auto")
+        : s.languageMode;
+      const nextParams = {
+        ...s.params,
+        ...params,
+        ...(hasLanguageId
+          ? { language_id: normalizeLanguageId(typeof params.language_id === "string" ? params.language_id : null) }
+          : {}),
+      } as GenerationParams;
+      const resolved = resolveLanguageState(s.model, nextParams, nextLanguageMode);
+      const next = {
+        params: resolved.params,
+        languageMode: resolved.languageMode,
+        selectedPreset: null,
+      };
+      persistDraftState({ ...s, ...next });
+      return next;
+    }),
+  setSelectedPreset: (preset) =>
+    set((s) => {
+      const next = { selectedPreset: preset };
+      persistDraftState({ ...s, ...next });
+      return next;
+    }),
 
   generate: async () => {
     const { text, model, params, selectedPreset } = get();
@@ -189,3 +363,29 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     }
   },
 }));
+
+useVoiceStore.subscribe((voiceState, previousVoiceState) => {
+  if (
+    voiceState.selectedVoiceId === previousVoiceState.selectedVoiceId
+    && voiceState.voices === previousVoiceState.voices
+  ) {
+    return;
+  }
+
+  useGenerationStore.setState((state) => {
+    const resolved = resolveLanguageState(state.model, state.params, state.languageMode);
+    const languageChanged = resolved.params.language_id !== state.params.language_id;
+    if (!languageChanged) {
+      return state;
+    }
+
+    const nextState = {
+      ...state,
+      params: resolved.params,
+      languageMode: resolved.languageMode,
+      selectedPreset: null,
+    };
+    persistDraftState(nextState);
+    return nextState;
+  });
+});

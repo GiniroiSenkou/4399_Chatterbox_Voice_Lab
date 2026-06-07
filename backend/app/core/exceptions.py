@@ -28,6 +28,11 @@ class GenerationError(HTTPException):
         super().__init__(status_code=500, detail=f"Generation failed: {reason}")
 
 
+class InvalidGenerationRequestError(HTTPException):
+    def __init__(self, reason: str) -> None:
+        super().__init__(status_code=422, detail=reason)
+
+
 class ProjectNotFoundError(HTTPException):
     def __init__(self, project_id: str) -> None:
         super().__init__(status_code=404, detail=f"Project '{project_id}' not found")
